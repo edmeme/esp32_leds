@@ -9,6 +9,7 @@
 #include "rotary_encoder.h"
 #include "button.h"
 #include "rgb.h"
+#include "wifi.h"
 
 #define TAG "LED"
 
@@ -97,6 +98,8 @@ void app_main()
   rgb_t color = {128,128,128};
   rgb_init(RED_GPIO, GREEN_GPIO, BLUE_GPIO);
   rgb_set(&color);
+
+  wifi_main();
   
   input_t input = {0};
   setup_input(&input);
