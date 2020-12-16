@@ -27,4 +27,26 @@ config ROT_ENC_B_GPIO
 
 		Some GPIOs are used for other purposes (flash connections, etc.) and cannot be used.
 
+
+config RGB_RED
+    int "RGB pwm red pin"
+	range 0 39
+	default 21
+	help
+		RGB pin for red.
+
+config RGB_GREEN
+    int "RGB pwm green pin"
+	range 0 39
+	default 17
+	help
+		RGB pin for green.
+
+config RGB_BLUE
+    int "RGB pwm blue pin"
+	range 0 39
+	default 2
+	help
+		RGB pin for blue.
+
 endmenu
