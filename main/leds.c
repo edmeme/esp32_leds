@@ -1,25 +1,3 @@
-/*
- * Copyright (c) 2019 David Antliff
- *
- * This program provides an example using the esp32-rotary-encoder component.
- * Events are received via an event queue and displayed on the serial console.
- * The task also polls the device position every second to show that the latest
- * event always matches the current position.
- *
- * esp32-rotary-encoder is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * esp32-rotary-encoder is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with esp32-rotary-encoder.  If not, see <https://www.gnu.org/licenses/>.
- */
-
 #include <stdbool.h>
 
 #include "freertos/FreeRTOS.h"
@@ -29,13 +7,15 @@
 #include "esp_log.h"
 
 #include "rotary_encoder.h"
+#include "button.h"
 
 #define TAG "LED"
 
+#define BUTTON_GPIO (CONFIG_BUTTON_GPIO)
 #define ROT_ENC_A_GPIO (CONFIG_ROT_ENC_A_GPIO)
 #define ROT_ENC_B_GPIO (CONFIG_ROT_ENC_B_GPIO)
 
-#define ENABLE_HALF_STEPS true  // Set to true to enable tracking of rotary encoder at half step resolution
+#define ENABLE_HALF_STEPS true  // true: Full resol. but worse error recovery
 
 enum mode {
   MODE_HUE,
@@ -52,43 +32,68 @@ typedef struct {
 } state_t;
 
 typedef struct {
-  rotary_encoder_info_t info;
+  rotary_encoder_info_t encoder;
+  button_info_t button;
   QueueHandle_t queue;
-} encoder_t;
+} input_t;
 
-encoder_t setup_encoder()
+void setup_input(input_t * input)
 {
-  // esp32-rotary-encoder requires that the GPIO ISR service is installed before calling rotary_encoder_register()
+  // esp32-rotary-encoder and button require that the GPIO ISR service
   ESP_ERROR_CHECK(gpio_install_isr_service(0));
   
   // Initialise the rotary encoder device with the GPIOs for A and B signals
-  rotary_encoder_info_t info = { 0 };
-  ESP_ERROR_CHECK(rotary_encoder_init(&info, ROT_ENC_A_GPIO, ROT_ENC_B_GPIO));
-  ESP_ERROR_CHECK(rotary_encoder_enable_half_steps(&info, ENABLE_HALF_STEPS));
-  ESP_ERROR_CHECK(rotary_encoder_flip_direction(&info));
-  
-  // Create a queue for events from the rotary encoder driver.
-  // Tasks can read from this queue to receive up to date position information.
-  QueueHandle_t queue = rotary_encoder_create_queue();
-  ESP_ERROR_CHECK(rotary_encoder_set_queue(&info, queue));
+  ESP_ERROR_CHECK(rotary_encoder_init(&input->encoder,
+				      ROT_ENC_A_GPIO, ROT_ENC_B_GPIO));
+  ESP_ERROR_CHECK(rotary_encoder_enable_half_steps(&input->encoder,
+						   ENABLE_HALF_STEPS));
+  ESP_ERROR_CHECK(rotary_encoder_flip_direction(&input->encoder));
 
-  encoder_t encoder = {info, queue};
-  return encoder;
+  // Initialise the button
+  ESP_ERROR_CHECK(button_init(&input->button, BUTTON_GPIO));
+  
+  // queue
+  input->queue = rotary_encoder_create_queue();
+  ESP_ERROR_CHECK(rotary_encoder_set_queue(&input->encoder,
+					   input->queue));
+  ESP_ERROR_CHECK(button_set_queue(&input->button,
+				   input->queue));
+  
+}
+
+esp_err_t unsetup_input(input_t * input){
+  ESP_ERROR_CHECK(rotary_encoder_uninit(&input->encoder));
+  return 0;
+}
+
+void handle_input(input_t * input) {
+  // Wait for incoming events on the event queue.
+
+  union {
+    rotary_encoder_event_t re;
+    button_event_t bt;
+  } event;
+  if (xQueueReceive(input->encoder.queue, &event,
+		    1000/portTICK_PERIOD_MS) == pdTRUE){
+    if(event.bt.id0 == BUTTON_EVID){
+      ESP_LOGI(TAG, "Event: button");
+    }else{
+      ESP_LOGI(TAG, "Event: position %d, direction %s",
+	       event.re.state.position,
+	       event.re.state.direction ? (event.re.state.direction == ROTARY_ENCODER_DIRECTION_CLOCKWISE ? "CW" : "CCW") : "NOT_SET");
+    }
+  }
+  
 }
 
 void app_main()
 {
-  encoder_t encoder = setup_encoder();
-  
+  input_t input = {0};
+  setup_input(&input);
   while (1) {
-    // Wait for incoming events on the event queue.
-    rotary_encoder_event_t event = { 0 };
-    if (xQueueReceive(encoder.queue, &event, 1000 / portTICK_PERIOD_MS) == pdTRUE){
-      ESP_LOGI(TAG, "Event: position %d, direction %s", event.state.position,
-	       event.state.direction ? (event.state.direction == ROTARY_ENCODER_DIRECTION_CLOCKWISE ? "CW" : "CCW") : "NOT_SET");
-    }
+    handle_input(&input);
   }
   ESP_LOGE(TAG, "queue receive failed");  
-  ESP_ERROR_CHECK(rotary_encoder_uninit(&encoder.info));
+  ESP_ERROR_CHECK(unsetup_input(&input));
 }
 

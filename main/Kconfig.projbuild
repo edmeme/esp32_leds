@@ -1,5 +1,14 @@
 menu "Project-specific Configuration"
 
+config BUTTON_GPIO
+    int "Rotary Encoder push button GPIO number"
+	range 0 39
+	default 15
+	help
+		GPIO number (IOxx) from which to sample the Rotary Encoder button output.
+
+		Some GPIOs are used for other purposes (flash connections, etc.) and cannot be used.
+
 config ROT_ENC_A_GPIO
     int "Rotary Encoder A output GPIO number"
 	range 0 39
