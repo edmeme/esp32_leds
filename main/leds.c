@@ -10,6 +10,7 @@
 #include "button.h"
 #include "rgb.h"
 #include "wifi.h"
+#include "http.h"
 
 #define TAG "LED"
 
@@ -71,7 +72,7 @@ esp_err_t unsetup_input(input_t * input){
   return 0;
 }
 
-void handle_input(input_t * input, state_t * state) {
+bool handle_input(input_t * input, state_t * state) {
   // Wait for incoming events on the event queue.
 
   union {
@@ -88,8 +89,9 @@ void handle_input(input_t * input, state_t * state) {
 	       event.re.state.position,
 	       event.re.state.direction ? (event.re.state.direction == ROTARY_ENCODER_DIRECTION_CLOCKWISE ? "CW" : "CCW") : "NOT_SET");
     }
+    return 1;
   }
-  
+  return 0;
 }
 
 void app_main()
@@ -97,10 +99,8 @@ void app_main()
   state_t state = {0};
   rgb_t color = {128,128,128};
   rgb_init(RED_GPIO, GREEN_GPIO, BLUE_GPIO);
-  rgb_set(&color);
-
   wifi_main();
-  
+  init_httpd();
   input_t input = {0};
   setup_input(&input);
   while (1) {

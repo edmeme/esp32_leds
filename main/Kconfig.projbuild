@@ -3,7 +3,7 @@ menu "Project-specific Configuration"
 config BUTTON_GPIO
     int "Rotary Encoder push button GPIO number"
 	range 0 39
-	default 15
+	default 19
 	help
 		GPIO number (IOxx) from which to sample the Rotary Encoder button output.
 

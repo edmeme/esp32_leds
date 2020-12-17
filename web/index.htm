@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8"/>
+    <script src="/kellycolorpicker.js" type="text/javascript"></script>
+    <script type="text/javascript">
+      function hex02(c) {
+	  var hex = c.toString(16);
+	  return hex.length == 1 ? "0" + hex : hex;
+      }
+
+      function rgb_to_hex(rgb) {
+	  return "#" + hex02(rgb.r) + hex02(rgb.g) + hex02(rgb.b);
+      }
+
+      function connect() {
+	  var protocol = (location.protocol === 'https:') ? 'wss://' : 'ws://';
+	  var url = protocol + location.host + '/ws';
+	  let socket = new WebSocket(url);
+	  window.socket = socket;
+	  socket.onmessage = function(event) {
+	      try{
+		  data = JSON.parse(event.data)
+		  hx = rgb_to_hex(data)
+		  picker.setColor(hx, false)
+		  console.log("Color set to " + event.data + " (" + hx + ")")
+	      }catch(e){
+		  console.log("Failed to parse " + event.data)
+	      }
+	  }
+	  socket.onopen = function(ev){
+	      socket.send("get")
+	      console.log("Connected")
+	  }
+	  
+      }
+      
+      function init(){
+	  connect()
+      }
+
+      function send_rgb(rgb){
+	  let outgoingMessage = JSON.stringify(rgb);
+	  socket.send(outgoingMessage);
+	  return false;	  
+      }
+      
+    </script>
+    <title>leds</title>
+  </head>
+  <body onload="init()">
+    <div class="example-wrap example-wrap-test-1">
+      <canvas id="picker"></canvas>
+      <br>
+      <script>
+        var picker = new KellyColorPicker({place : 'picker'});
+	picker.addUserEvent("change",function (){send_rgb(picker.getCurColorRgb())})
+      </script>
+    </div>  
+  </body>
+</html>

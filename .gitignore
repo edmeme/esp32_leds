@@ -1,0 +1,6 @@
+*\#
+.\#*
+main/webfiles.h
+build
+sdkconfig
+sdkconfig.old
