@@ -23,24 +23,33 @@
 
 #define ENABLE_HALF_STEPS true  // true: Full resol. but worse error recovery
 
+static inline int max(int a, int b){
+  return (a > b) ? a : b;
+}
+
+static inline int min(int a, int b){
+  return (a < b) ? a : b;
+}
+
+static const uint32_t DEBOUNCE_TIME = 10; // in milliseconds
+
 enum mode {
-  MODE_HUE,
+  MODE_HUE = 0,
   MODE_SAT,
   MODE_VALUE
 };
 
 typedef struct {
-  short hue;
-  short sat;
-  short value;
-  
+  hsv_t hsv;
   int cursor_mode;
 } state_t;
 
 typedef struct {
   rotary_encoder_info_t encoder;
   button_info_t button;
-  QueueHandle_t queue;
+  QueueHandle_t queue; 
+  int encoder_ref; // The encoder value is never reset, we use this to keep track of its delta.
+  uint32_t btn_last_time; // Last time the button was pressed, for shitty debounce
 } input_t;
 
 void setup_input(input_t * input)
@@ -72,9 +81,10 @@ esp_err_t unsetup_input(input_t * input){
   return 0;
 }
 
-bool handle_input(input_t * input, state_t * state) {
-  // Wait for incoming events on the event queue.
+static const char * const _color_fields[] = {"hue","sat","value"};
 
+// Handles physical interface, returns true if something is updated.
+bool handle_input(input_t * input, state_t * state) {
   union {
     rotary_encoder_event_t re;
     button_event_t bt;
@@ -82,32 +92,57 @@ bool handle_input(input_t * input, state_t * state) {
   if (xQueueReceive(input->encoder.queue, &event,
 		    1000/portTICK_PERIOD_MS) == pdTRUE){
     if(event.bt.id0 == BUTTON_EVID){
-      ESP_LOGI(TAG, "Event: button");
+      // Ask/Google debouncing if you are looking at this code
+      uint32_t now = esp_log_timestamp();
+      if(now - input->btn_last_time > DEBOUNCE_TIME) {
+	input->btn_last_time = now;
+	
+	state->cursor_mode = state->cursor_mode + 1;
+	if(state->cursor_mode > 2) state->cursor_mode = 0;
+	ESP_LOGI(TAG, "Encoder mode: %s", _color_fields[state->cursor_mode]);
+      } else {
+	ESP_LOGW(TAG, "Encoder mode debounce override");
+	return false; // Nothing changed
+      }
     }else{
-      state->value = event.re.state.position & 0xff;
-      ESP_LOGI(TAG, "Event: position %d, direction %s",
-	       event.re.state.position,
-	       event.re.state.direction ? (event.re.state.direction == ROTARY_ENCODER_DIRECTION_CLOCKWISE ? "CW" : "CCW") : "NOT_SET");
+      int delta = event.re.state.position - input->encoder_ref;
+      input->encoder_ref = event.re.state.position;
+
+      // Use an int to prevent overflow "wrap-around"
+      uint8_t * target = &((uint8_t*)(&state->hsv))[state->cursor_mode];
+      int new_value = max(0,min(0xff,*target + delta));
+      
+      ESP_LOGI(TAG, "Encoder: %s = %d + %d",
+	       _color_fields[state->cursor_mode],
+	       *target, delta);
+      
+      *target = new_value & 0xff;
     }
-    return 1;
+    return true;
   }
-  return 0;
+  return false;
 }
 
 void app_main()
 {
+  // state and defaults
   state_t state = {0};
-  rgb_t color = {128,128,128};
+  input_t input = {0};
+  state.cursor_mode = MODE_VALUE;
+  // init stuff
   rgb_init(RED_GPIO, GREEN_GPIO, BLUE_GPIO);
   wifi_main();
   init_httpd();
-  input_t input = {0};
   setup_input(&input);
+
   while (1) {
-    handle_input(&input, &state);
-    color.r = color.g = color.b = state.value;
-    rgb_set(&color);
+    bool updated = handle_input(&input, &state);
+    if(updated){
+      rgb_set(hsv_to_rgb(state.hsv));
+      // ToDo notify clients
+    }
   }
+  
   ESP_LOGE(TAG, "queue receive failed");  
   ESP_ERROR_CHECK(unsetup_input(&input));
 }
