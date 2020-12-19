@@ -41,6 +41,7 @@ enum mode {
 
 typedef struct {
   hsv_t hsv;
+  rgb_t rgb;
   int cursor_mode;
 } state_t;
 
@@ -88,6 +89,7 @@ bool handle_input(input_t * input, state_t * state) {
   union {
     rotary_encoder_event_t re;
     button_event_t bt;
+    web_color_event_t web;
   } event;
   if (xQueueReceive(input->encoder.queue, &event,
 		    1000/portTICK_PERIOD_MS) == pdTRUE){
@@ -104,6 +106,11 @@ bool handle_input(input_t * input, state_t * state) {
 	ESP_LOGW(TAG, "Encoder mode debounce override");
 	return false; // Nothing changed
       }
+    }else if(event.bt.id0 == WEB_COLOR_EVID){
+      ESP_LOGI(TAG, "Web color event");
+      state->rgb = event.web.color;
+      state->hsv = rgb_to_hsv(state->rgb);
+      return true;
     }else{
       int delta = event.re.state.position - input->encoder_ref;
       input->encoder_ref = event.re.state.position;
@@ -117,6 +124,7 @@ bool handle_input(input_t * input, state_t * state) {
 	       *target, delta);
       
       *target = new_value & 0xff;
+      state->rgb = hsv_to_rgb(state->hsv);
     }
     return true;
   }
@@ -132,13 +140,13 @@ void app_main()
   // init stuff
   rgb_init(RED_GPIO, GREEN_GPIO, BLUE_GPIO);
   wifi_main();
-  init_httpd();
   setup_input(&input);
+  init_httpd(&state.rgb, input.queue);
 
   while (1) {
     bool updated = handle_input(&input, &state);
     if(updated){
-      rgb_set(hsv_to_rgb(state.hsv));
+      rgb_set(state.rgb);
       // ToDo notify clients
     }
   }

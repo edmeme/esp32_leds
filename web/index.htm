@@ -40,7 +40,7 @@
       }
 
       function send_rgb(rgb){
-	  let outgoingMessage = JSON.stringify(rgb);
+	  let outgoingMessage = JSON.stringify([rgb.r,rgb.g,rgb.b]);
 	  socket.send(outgoingMessage);
 	  return false;	  
       }

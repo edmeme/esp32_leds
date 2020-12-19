@@ -19,6 +19,11 @@
 
 static const char *TAG = "http";
 
+typedef struct {
+  const rgb_t * color;
+  QueueHandle_t queue;
+} server_state_t;
+
 /* Serve a file from context */
 static esp_err_t root_get_handler(httpd_req_t *req)
 {
@@ -79,6 +84,8 @@ static esp_err_t trigger_async_send(httpd_handle_t handle, httpd_req_t *req)
 
 static esp_err_t ws_handler(httpd_req_t *req)
 {
+  server_state_t * state = (server_state_t*)
+    httpd_get_global_user_ctx(req->handle);
   uint8_t buf[128] = { 0 };
   httpd_ws_frame_t ws_pkt;
   memset(&ws_pkt, 0, sizeof(httpd_ws_frame_t));
@@ -95,91 +102,119 @@ static esp_err_t ws_handler(httpd_req_t *req)
     // On new connection, send the current rgb value
     if(strcmp((char*)ws_pkt.payload,"get") == 0) {
       uint8_t out[128];
-      int r=1,g=2,b=3;
+      if(!state){
+	ESP_LOGE(TAG, "No context found");
+      }
+      int r=state->color->r;
+      int g=state->color->g;
+      int b=state->color->b;
       snprintf((char*)out,sizeof(out), "{\"r\":%d,\"g\":%d,\"b\":%d}", r,g,b);
       ws_pkt.payload = out;
       ws_pkt.len = strlen((char*)out);
       ESP_LOGI(TAG, "New connection on ws, sending color.");
       return httpd_ws_send_frame(req, &ws_pkt);
     }
-    if(ws_pkt.payload[0] == '{') {
-      ESP_LOGI(TAG, "Got JSON color %s.", ws_pkt.payload);
+    if(ws_pkt.payload[0] == '[') {
+      ESP_LOGI(TAG, "Got color %s.", ws_pkt.payload);
+      char * data = (char*) ws_pkt.payload;
+      char * parts[3] = {NULL,NULL,NULL};
+      int ipart = 0;
+      for(char *p = data; *p;++p){
+	if(*p == ']' || *p == ',' || *p == '['){
+	  *p = 0;
+	  if(ipart < 3){
+	    parts[ipart++] = p+1;
+	  }
+	}
+      }      
+      if(ipart == 3){
+	ESP_LOGI(TAG, "red: %s, green: %s, blue %s.",
+		 parts[0], parts[1], parts[2]);
+	web_color_event_t msg;
+	msg.id0 = WEB_COLOR_EVID;
+	msg.color.r = atoi(parts[0]);
+	msg.color.g = atoi(parts[1]);
+	msg.color.b = atoi(parts[2]);
+	BaseType_t task_woken = pdFALSE;
+	xQueueOverwrite(state->queue, &msg);
+      }
       return ESP_OK;
     }
   }
-    
-  /*if (ws_pkt.type == HTTPD_WS_TYPE_TEXT &&
-      strcmp((char*)ws_pkt.payload,"Trigger async") == 0) {
-    return trigger_async_send(req->handle, req);
-    }
-  
-  ret = httpd_ws_send_frame(req, &ws_pkt);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "httpd_ws_send_frame failed with %d", ret);
-    }*/
   return ret;
 }
 
 static const httpd_uri_t ws = {
-        .uri        = "/ws",
-        .method     = HTTP_GET,
-        .handler    = ws_handler,
-        .user_ctx   = NULL,
-        .is_websocket = true
+  .uri        = "/ws",
+  .method     = HTTP_GET,
+  .handler    = ws_handler,
+  .user_ctx   = NULL,
+  .is_websocket = true
 };
 
-
-static httpd_handle_t start_webserver(void)
+static httpd_handle_t start_webserver(const rgb_t * color, QueueHandle_t queue)
 {
-    httpd_handle_t server = NULL;
-    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+  server_state_t * state = (server_state_t *) calloc(1, sizeof(server_state_t));
+  state->color = color;
+  state->queue = queue;
 
-    // Start the httpd server
-    ESP_LOGI(TAG, "Starting server on port: '%d'", config.server_port);
-    if (httpd_start(&server, &config) == ESP_OK) {
-        // Set URI handlers
-        ESP_LOGI(TAG, "Registering URI handlers");
-        httpd_register_uri_handler(server, &root);
-        httpd_register_uri_handler(server, &js_picker);
-	httpd_register_uri_handler(server, &ws);
-        return server;
-    }
+  httpd_handle_t server = NULL;
+  httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+  config.global_user_ctx = state;
+  config.global_user_ctx_free_fn = free;
+  
+  // Start the httpd server
+  ESP_LOGI(TAG, "Starting server on port: '%d'", config.server_port);
+  if (httpd_start(&server, &config) == ESP_OK) {
+    // Set URI handlers
+    ESP_LOGI(TAG, "Registering URI handlers");
+    httpd_register_uri_handler(server, &root);
+    httpd_register_uri_handler(server, &js_picker);
+    httpd_register_uri_handler(server, &ws);
+    return server;
+  }
 
-    ESP_LOGI(TAG, "Error starting server!");
-    return NULL;
+  ESP_LOGI(TAG, "Error starting server!");
+  return NULL;
 }
 
 static void stop_webserver(httpd_handle_t server)
 {
-    // Stop the httpd server
-    httpd_stop(server);
+  // Stop the httpd server
+  httpd_stop(server);
 }
 
 static void disconnect_handler(void* arg, esp_event_base_t event_base,
                                int32_t event_id, void* event_data)
 {
-    httpd_handle_t* server = (httpd_handle_t*) arg;
-    if (*server) {
-        ESP_LOGI(TAG, "Stopping webserver");
-        stop_webserver(*server);
-        *server = NULL;
-    }
+  httpd_handle_t* server = (httpd_handle_t*) arg;
+  if (*server) {
+    ESP_LOGI(TAG, "Stopping webserver");
+    stop_webserver(*server);
+    *server = NULL;
+  }
 }
+
+// Filthy
+static const rgb_t * g_color;
+static QueueHandle_t g_queue;
 
 static void connect_handler(void* arg, esp_event_base_t event_base,
                             int32_t event_id, void* event_data)
 {
-    httpd_handle_t* server = (httpd_handle_t*) arg;
-    if (*server == NULL) {
-        ESP_LOGI(TAG, "Starting webserver");
-        *server = start_webserver();
-    }
+  httpd_handle_t* server = (httpd_handle_t*) arg;
+  if (*server == NULL) {
+    ESP_LOGI(TAG, "Starting webserver");
+    *server = start_webserver(g_color, g_queue);
+  }
 }
 
-void init_httpd()
+void init_httpd(const rgb_t * color, QueueHandle_t queue)
 {
-    static httpd_handle_t server = NULL;
-    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &connect_handler, &server));
-    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &disconnect_handler, &server));
-    server = start_webserver();
+  g_color = color;
+  g_queue = queue;
+  static httpd_handle_t server = NULL;
+  ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &connect_handler, &server));
+  ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &disconnect_handler, &server));
+  server = start_webserver(color, queue);
 }
