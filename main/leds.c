@@ -11,6 +11,7 @@
 #include "rgb.h"
 #include "wifi.h"
 #include "http.h"
+#include "storage.h"
 
 #define TAG "LED"
 
@@ -21,7 +22,10 @@
 #define GREEN_GPIO (CONFIG_RGB_GREEN)
 #define BLUE_GPIO (CONFIG_RGB_BLUE)
 
-#define ENABLE_HALF_STEPS true  // true: Full resol. but worse error recovery
+typedef persistent_state_t state_t; // All state is persistent state.
+
+static const bool ENABLE_HALF_STEPS = true; // true: Full resol. encoder, worse error recovery
+static const uint32_t DEBOUNCE_TIME = 400;   // in milliseconds
 
 static inline int max(int a, int b){
   return (a > b) ? a : b;
@@ -31,19 +35,11 @@ static inline int min(int a, int b){
   return (a < b) ? a : b;
 }
 
-static const uint32_t DEBOUNCE_TIME = 10; // in milliseconds
-
 enum mode {
   MODE_HUE = 0,
   MODE_SAT,
   MODE_VALUE
 };
-
-typedef struct {
-  hsv_t hsv;
-  rgb_t rgb;
-  int cursor_mode;
-} state_t;
 
 typedef struct {
   rotary_encoder_info_t encoder;
@@ -131,22 +127,29 @@ bool handle_input(input_t * input, state_t * state) {
   return false;
 }
 
+void initialize_state(persistent_state_t * s){
+  s->rgb.r = 255;
+  s->rgb.g = 30;
+  s->rgb.b = 0;
+  s->hsv = rgb_to_hsv(s->rgb);
+  s->cursor_mode = MODE_VALUE;
+}
+
 void app_main()
 {
   // state and defaults
-  state_t state = {0};
+  state_t * state = storage_initialize(initialize_state);
   input_t input = {0};
-  state.cursor_mode = MODE_VALUE;
   // init stuff
   rgb_init(RED_GPIO, GREEN_GPIO, BLUE_GPIO);
   wifi_main();
   setup_input(&input);
-  init_httpd(&state.rgb, input.queue);
+  init_httpd(&state->rgb, input.queue);
 
   while (1) {
-    bool updated = handle_input(&input, &state);
+    bool updated = handle_input(&input, state);
     if(updated){
-      rgb_set(state.rgb);
+      rgb_set(state->rgb);
       // ToDo notify clients
     }
   }
