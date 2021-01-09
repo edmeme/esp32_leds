@@ -114,6 +114,7 @@ static esp_err_t ws_handler(httpd_req_t *req)
       ESP_LOGI(TAG, "New connection on ws, sending color.");
       return httpd_ws_send_frame(req, &ws_pkt);
     }
+
     if(ws_pkt.payload[0] == '[') {
       ESP_LOGI(TAG, "Got color %s.", ws_pkt.payload);
       char * data = (char*) ws_pkt.payload;
@@ -135,6 +136,33 @@ static esp_err_t ws_handler(httpd_req_t *req)
 	msg.color.r = atoi(parts[0]);
 	msg.color.g = atoi(parts[1]);
 	msg.color.b = atoi(parts[2]);
+	BaseType_t task_woken = pdFALSE;
+	xQueueOverwrite(state->queue, &msg);
+      }
+      return ESP_OK;
+    }
+
+    if(ws_pkt.payload[0] == '<') {
+      ESP_LOGI(TAG, "Got corr %s.", ws_pkt.payload);
+      char * data = (char*) ws_pkt.payload;
+      char * parts[3] = {NULL,NULL,NULL};
+      int ipart = 0;
+      for(char *p = data; *p;++p){
+	if(*p == '>' || *p == ',' || *p == '<'){
+	  *p = 0;
+	  if(ipart < 3){
+	    parts[ipart++] = p+1;
+	  }
+	}
+      }      
+      if(ipart == 3){
+	ESP_LOGI(TAG, "red: %s, green: %s, blue %s.",
+		 parts[0], parts[1], parts[2]);
+	web_calibration_event_t msg;
+	msg.id0 = WEB_CALIBRATION_EVID;
+	msg.color.r_scale = atoi(parts[0]);
+	msg.color.g_scale = atoi(parts[1]);
+	msg.color.b_scale = atoi(parts[2]);
 	BaseType_t task_woken = pdFALSE;
 	xQueueOverwrite(state->queue, &msg);
       }

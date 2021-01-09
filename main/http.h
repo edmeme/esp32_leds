@@ -10,11 +10,18 @@
 // receive a function that in turns queues events, its a lot more flexible than
 // hacky id's.
 static const uint32_t WEB_COLOR_EVID = 0x177EB011;
+static const uint32_t WEB_CALIBRATION_EVID = 0x38f134ab;
 
 typedef struct {
   uint32_t id0;
   rgb_t color;
 } web_color_event_t;
+
+typedef struct {
+  uint32_t id0;
+  rgb_calibration_t color;
+} web_calibration_event_t;
+
 
 /**
  * color points to a structure that holds the current rgb state of the leds.

@@ -4,6 +4,7 @@
 typedef struct {
   hsv_t hsv;
   rgb_t rgb;
+  rgb_calibration_t cal;
   int cursor_mode;
 } persistent_state_t;
 

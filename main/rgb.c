@@ -6,6 +6,8 @@
 
 const char * TAG = "RGB";
 
+static rgb_calibration_t rgb_cal = {128, 128, 128};
+
 /* channels */
 #define LED_R_PWM_CHANNEL LEDC_CHANNEL_1 
 #define LED_G_PWM_CHANNEL LEDC_CHANNEL_2
@@ -15,6 +17,17 @@ const char * TAG = "RGB";
 #define LED_PWM_TIMER LEDC_TIMER_1
 // #define LED_PWM_BIT_NUM LEDC_TIMER_10_BIT  // 1024 ( 1023 )
 #define LED_PWM_BIT_NUM LEDC_TIMER_8_BIT    // 256 ( 255 )
+
+static rgb_t correct_rgb(rgb_t in, rgb_calibration_t cal){
+  unsigned int r = (in.r * (cal.r_scale + 128)) / 256;
+  unsigned int g = (in.g * (cal.g_scale + 128)) / 256;
+  unsigned int b = (in.b * (cal.b_scale + 128)) / 256;
+  rgb_t color = {
+    r>0xFF ? 0xFF : r,
+    g>0xFF ? 0xFF : g,
+    b>0xFF ? 0xFF : b};
+  return color;
+}
 
 void rgb_init(gpio_num_t red_pin,
 	      gpio_num_t green_pin,
@@ -62,9 +75,12 @@ void rgb_init(gpio_num_t red_pin,
   ESP_ERROR_CHECK( ledc_timer_config(&ledc_timer) );
 }
 
-void rgb_set(rgb_t rgb)
+void rgb_set(rgb_t rgb_in)
 {
-  ESP_LOGI(TAG, "RGB: Color set to r:%d g:%d b:%d",
+  rgb_t rgb = correct_rgb(rgb_in, rgb_cal);
+  ESP_LOGI(TAG, "RGB: Color set to r:%d g:%d b:%d ",
+	   rgb_in.r, rgb_in.g, rgb_in.b);
+  ESP_LOGI(TAG, "RGB: Color corrected to r:%d g:%d b:%d ",
 	   rgb.r, rgb.g, rgb.b);
   /* LED R */
   ESP_ERROR_CHECK(ledc_set_duty(LEDC_HIGH_SPEED_MODE, LED_R_PWM_CHANNEL, rgb.r));
@@ -79,6 +95,9 @@ void rgb_set(rgb_t rgb)
   ESP_ERROR_CHECK(ledc_update_duty(LEDC_HIGH_SPEED_MODE, LED_B_PWM_CHANNEL) );
 }
 
+void rgb_set_calib(rgb_calibration_t cal){
+  rgb_cal = cal;
+}
 
 rgb_t hsv_to_rgb(hsv_t hsv){
   rgb_t rgb;

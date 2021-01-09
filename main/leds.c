@@ -85,7 +85,8 @@ bool handle_input(input_t * input, state_t * state) {
   union {
     rotary_encoder_event_t re;
     button_event_t bt;
-    web_color_event_t web;
+    web_color_event_t web_color;
+    web_calibration_event_t web_cal;
   } event;
   if (xQueueReceive(input->encoder.queue, &event,
 		    1000/portTICK_PERIOD_MS) == pdTRUE){
@@ -104,8 +105,12 @@ bool handle_input(input_t * input, state_t * state) {
       }
     }else if(event.bt.id0 == WEB_COLOR_EVID){
       ESP_LOGI(TAG, "Web color event");
-      state->rgb = event.web.color;
+      state->rgb = event.web_color.color;
       state->hsv = rgb_to_hsv(state->rgb);
+      return true;
+    }else if(event.bt.id0 == WEB_CALIBRATION_EVID){
+      ESP_LOGI(TAG, "Web calibration event");
+      state->cal = event.web_cal.color;
       return true;
     }else{
       int delta = event.re.state.position - input->encoder_ref;
@@ -132,6 +137,12 @@ void initialize_state(persistent_state_t * s){
   s->rgb.g = 30;
   s->rgb.b = 0;
   s->hsv = rgb_to_hsv(s->rgb);
+
+  // Calibrated by hand
+  s->cal.r_scale = 128;
+  s->cal.g_scale = 0;
+  s->cal.b_scale = 50;
+  
   s->cursor_mode = MODE_VALUE;
 }
 
@@ -145,10 +156,13 @@ void app_main()
   wifi_main();
   setup_input(&input);
   init_httpd(&state->rgb, input.queue);
-
+  
+  rgb_set_calib(state->cal);
+  rgb_set(state->rgb);
   while (1) {
     bool updated = handle_input(&input, state);
     if(updated){
+      rgb_set_calib(state->cal);
       rgb_set(state->rgb);
       // ToDo notify clients
     }
